@@ -1,14 +1,12 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local BoatSystemFolder = ReplicatedStorage:WaitForChild("BoatSystem")
-local WaterFolder = workspace:WaitForChild("Water")
-
 local WaterPart = BoatSystemFolder:WaitForChild("WaterPart")
-local WaterRenderConnection
-local WaterPartSize = WaterPart.Size
 
-local BoatModel_Primary
+local Boat_Render_Connection
+local Boat_Tilt = 0
 
 local WaterData = {
 	WaterAmplitude,
@@ -19,22 +17,22 @@ local WaterData = {
 
 --
 
-local BOATMODEL_HEIGHT = 1.5
-local WATER_RADIUS = 25
-local WATER_BLOCK = BoatSystemFolder:WaitForChild("WaterPart")
-local WATER_PARTS = {}
-local WATER_COLOR = ColorSequence.new({
-	ColorSequenceKeypoint.new(0,Color3.new(0, 0.6, 1)),
-	ColorSequenceKeypoint.new(1,Color3.new(0.560784, 1, 1))
-})
+local BOATMODEL = script.Parent.Parent
+local BOATMODEL_SEAT = BOATMODEL:WaitForChild("Seat")
+local BOATMODEL_PRIMARY = BOATMODEL.PrimaryPart
+
+local BOATMODEL_MAXSPEED = 0.5
+local BOATMODEL_MAX_TILT = 0.2
+local BOATMODE_SPEEDMIN = 0.01
+local BOATMODEL_LENGTH = 9
+local BOATMODEL_HEIGHT = 1.6
+local BOATMODEL_SPEED = 0.1
+local BOATMODEL_TILT = 60
+
+local BOAT_HEIGHTOFFSET = Vector3.yAxis * (BOATMODEL_HEIGHT/2 + WaterPart.Size.X)
+local BOAT_SWAY = 25
 
 --
-
-local function GetWaterColor(Position)
-	local ColorNumber = math.clamp((Position.Y/2),0,1) 
-
-	return WATER_COLOR.Keypoints[1].Value:Lerp(WATER_COLOR.Keypoints[2].Value,ColorNumber)
-end
 
 local function GetPerlinNoiseValue(Number1,Number2)
 	local Y = math.noise(
@@ -45,63 +43,63 @@ local function GetPerlinNoiseValue(Number1,Number2)
 	return math.clamp(Y,-1,1) * WaterData.WaterAmplitude
 end
 
-local function RenderWater()
-	local CurrentPosition = BoatModel_Primary.Position + BoatModel_Primary.CFrame.LookVector * WATER_RADIUS/3
+local function IsValidOccupant(Occupant)
+	if Occupant and Occupant.Parent then
+		local Character = Occupant.Parent
+		local Humanoid = Character:FindFirstChild("Humanoid")
 
-	for _,v in pairs(WaterFolder:GetChildren()) do
-		local PartPosition = v.Position
-
-		v.Color = GetWaterColor(PartPosition)
-		v.Position = ((WATER_PARTS[v] + CurrentPosition) * Vector3.new(1,0,1)) + (Vector3.yAxis * GetPerlinNoiseValue(PartPosition.X,PartPosition.Z))
+		return Humanoid and Humanoid.Health > 0
 	end
 end
 
-local function PlaceWaterPart(Position)
-	local Part = WATER_BLOCK:Clone()
+local function RenderBoat()
+	local OldBoatCFrame = BOATMODEL_PRIMARY.CFrame
 
-	Part.Position = Position - Vector3.new(0,BOATMODEL_HEIGHT + WaterPartSize.X,0)
-	Part.Color = GetWaterColor(Position)
-	Part.Size = WaterPartSize
-	Part.Anchored = true
+	local SteerInput = -BOATMODEL_SEAT.SteerFloat/50
 
-	WATER_PARTS[Part] = Part.Position - BoatModel_Primary.Position
+	local ThrottleInput = BOATMODEL_SPEED + BOATMODEL_SEAT.Throttle/50
 
-	Part.Parent = WaterFolder
+	local LookVector = OldBoatCFrame.LookVector * Vector3.new(1,0,1)
+
+
+	BOATMODEL_SPEED = ThrottleInput >= 0 and ThrottleInput <= BOATMODEL_MAXSPEED and ThrottleInput or ThrottleInput >= BOATMODEL_MAXSPEED and BOATMODEL_MAXSPEED or BOATMODE_SPEEDMIN
+
+
+	local NewBoatPosition = (OldBoatCFrame.Position * Vector3.new(1,0,1)) + LookVector * BOATMODEL_SPEED
+
+	local NewBoatTipPosition = (OldBoatCFrame.Position * Vector3.new(1,0,1)) + LookVector * (BOATMODEL_LENGTH/3)
+
+
+	local NewBoatPosition_Y = Vector3.yAxis * GetPerlinNoiseValue(NewBoatPosition.X,NewBoatPosition.Z)
+
+	local NewBoatTipPosition_Y = Vector3.yAxis * GetPerlinNoiseValue(NewBoatTipPosition.X,NewBoatTipPosition.Z)
+
+
+	local BoatSteerCFrame = CFrame.Angles(0,SteerInput,math.clamp(SteerInput + OldBoatCFrame.Rotation.Z/BOATMODEL_TILT,-BOATMODEL_MAX_TILT,BOATMODEL_MAX_TILT) + GetPerlinNoiseValue(0,Boat_Tilt)/(WaterData.WaterAmplitude * BOAT_SWAY))
+
+
+	BOATMODEL_PRIMARY.CFrame = CFrame.new(NewBoatPosition + NewBoatPosition_Y,NewBoatTipPosition + NewBoatTipPosition_Y) * BoatSteerCFrame + BOAT_HEIGHTOFFSET
+
+	Boat_Tilt += 0.5
 end
 
-local function GenerateCircle(BoatPosition)
-	local Start_X = BoatPosition.X - WATER_RADIUS
-	local Start_Z = BoatPosition.Z - WATER_RADIUS
+local function OccupantChanged()
+	local Occupant = BOATMODEL_SEAT.Occupant
 
-	local End_X = BoatPosition.X + WATER_RADIUS
-	local End_Z = BoatPosition.Z + WATER_RADIUS
+	if not IsValidOccupant(Occupant) then return end
 
-	for X = Start_X, End_X, WaterPartSize.X do
-		for Z = Start_Z, End_Z, WaterPartSize.X do
-			if math.pow(X - BoatPosition.X,2) + math.pow(Z - BoatPosition.Z,2) <= math.pow(WATER_RADIUS,2) then
-				PlaceWaterPart(Vector3.new(X, BoatPosition.Y, Z))
-			end
-		end
-	end
+	local Player = Players:GetPlayerFromCharacter(Occupant.Parent)
+
+	Boat_Render_Connection = RunService.Heartbeat:Connect(RenderBoat)
+
+	BoatSystemFolder.SetupBoat:FireClient(Player,BOATMODEL)
+
+	BOATMODEL_SEAT:GetPropertyChangedSignal("Occupant"):Wait()
+
+	Boat_Render_Connection:Disconnect()
+
+	BoatSystemFolder.SetupBoat:FireClient(Player)
 end
-
-BoatSystemFolder.SetupBoat.OnClientEvent:Connect(function(Boat)
-	if Boat then
-		BoatModel_Primary = Boat.PrimaryPart
-
-		GenerateCircle(BoatModel_Primary.Position)
-
-		WaterRenderConnection = RunService.RenderStepped:Connect(RenderWater)
-	else
-		WaterFolder:ClearAllChildren()
-
-		table.clear(WATER_PARTS)
-
-		if WaterRenderConnection then
-			WaterRenderConnection:Disconnect()
-		end
-	end
-end)
 
 for _,v in pairs(BoatSystemFolder:GetChildren()) do
 	if v:IsA("NumberValue") then
@@ -112,3 +110,7 @@ for _,v in pairs(BoatSystemFolder:GetChildren()) do
 		WaterData[v.Name] = v.Value
 	end
 end
+
+BOATMODEL_SEAT:GetPropertyChangedSignal("Occupant"):Connect(OccupantChanged)
+
+OccupantChanged()

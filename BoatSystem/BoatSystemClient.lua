@@ -1,147 +1,114 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
 
 local BoatSystemFolder = ReplicatedStorage:WaitForChild("BoatSystem")
-local BoatModel = BoatSystemFolder:WaitForChild("Boat")
-local Baseplate = workspace:WaitForChild("Baseplate")
+local WaterFolder = workspace:WaitForChild("Water")
 
-local SpawnModel = BoatSystemFolder:WaitForChild("Spawn")
 local WaterPart = BoatSystemFolder:WaitForChild("WaterPart")
-local SpawnBoat = SpawnModel.SpawnBoat
+local WaterRenderConnection
+local WaterPartSize = WaterPart.Size
 
-local Water_Resolution
-local Water_Frequency
-local Water_Amplitude
-local Seed = 1
+local BoatModel_Primary
 
-local DefaultCondition = {
-	CONDITION_NAME = "Normal",
-	WATER_RESOLUTION = 150,
-	WATER_FREQUENCY = 5,
-	WATER_AMPLITUDE = 4
-}
-
-local Conditions = {
-	{
-		CONDITION_NAME = "High waves",
-		WATER_AMPLITUDE = 6
-	},
-
-	{
-		CONDITION_NAME = "Storm",
-		WATER_AMPLITUDE = 7
-	},
-
-	{
-		CONDITION_NAME = "Calm",
-		WATER_AMPLITUDE = 2,
-	},
-
-	{
-		CONDITION_NAME = "Still",
-		WATER_AMPLITUDE = 1,
-	},
-
-	DefaultCondition
-}
-
-local MetaTables = {
-	__index = function(_,Index)
-		return DefaultCondition[Index]
-	end
+local WaterData = {
+	WaterAmplitude,
+	WaterFrequency,
+	WaterResolution,
+	WaterSeed
 }
 
 --
 
-local WATER_PARTSIZE = Vector3.new(0.7,1,0.7)
-local CONDITION_CHANGETIME = 60
-local CONDITION_TWEENTIME = 25
+local BOATMODEL_HEIGHT = 1.5
+local WATER_RADIUS = 25
+local WATER_BLOCK = BoatSystemFolder:WaitForChild("WaterPart")
+local WATER_PARTS = {}
+local WATER_COLOR = ColorSequence.new({
+	ColorSequenceKeypoint.new(0,Color3.new(0, 0.6, 1)),
+	ColorSequenceKeypoint.new(1,Color3.new(0.560784, 1, 1))
+})
 
 --
+
+local function GetWaterColor(Position)
+	local ColorNumber = math.clamp((Position.Y/2),0,1) 
+
+	return WATER_COLOR.Keypoints[1].Value:Lerp(WATER_COLOR.Keypoints[2].Value,ColorNumber)
+end
 
 local function GetPerlinNoiseValue(Number1,Number2)
 	local Y = math.noise(
-		(Number1 + Seed) / Water_Resolution * Water_Frequency,
-		(Number2 + Seed) / Water_Resolution * Water_Amplitude
+		(Number1 + WaterData.WaterSeed) / WaterData.WaterResolution * WaterData.WaterFrequency,
+		(Number2 + WaterData.WaterSeed) / WaterData.WaterResolution * WaterData.WaterFrequency
 	)
 
-	return math.clamp(Y,-1,1) * Water_Amplitude
+	return math.clamp(Y,-1,1) * WaterData.WaterAmplitude
 end
 
-local function GetRandomPointOnWater()
-	local Position = Vector3.new(math.random(-Baseplate.Size.X/2, Baseplate.Size.X/2),0,math.random(-Baseplate.Size.Y/2, Baseplate.Size.Y/2))
-	return Position + Vector3.yAxis * GetPerlinNoiseValue(Position.X,Position.Z)
-end
+local function RenderWater()
+	local CurrentPosition = BoatModel_Primary.Position + BoatModel_Primary.CFrame.LookVector * WATER_RADIUS/3
 
-local function SetCondition(Condition)
-	print("New water condition!",Condition.CONDITION_NAME)
+	for _,v in pairs(WaterFolder:GetChildren()) do
+		local PartPosition = v.Position
 
-	Water_Resolution = Condition.WATER_RESOLUTION
-	Water_Frequency = Condition.WATER_FREQUENCY
-	Water_Amplitude = Condition.WATER_AMPLITUDE
-
-	TweenService:Create(BoatSystemFolder.WaterResolution,TweenInfo.new(CONDITION_TWEENTIME),{Value = Water_Resolution}):Play()
-	TweenService:Create(BoatSystemFolder.WaterFrequency,TweenInfo.new(CONDITION_TWEENTIME),{Value = Water_Frequency}):Play()
-	TweenService:Create(BoatSystemFolder.WaterAmplitude,TweenInfo.new(CONDITION_TWEENTIME),{Value = Water_Amplitude}):Play()
-end
-
-local function SetupBoatSystem()
-	SetCondition(DefaultCondition)
-
-	for _,v in pairs(Conditions) do
-		setmetatable(v,MetaTables)
-	end
-
-	local BoatFolder = Instance.new("Folder")
-	local WaterFolder = Instance.new("Folder")
-
-	BoatFolder.Name = "Boats"
-	WaterFolder.Name = "Water"
-
-	BoatSystemFolder.WaterResolution.Value = Water_Resolution
-	BoatSystemFolder.WaterFrequency.Value = Water_Frequency
-	BoatSystemFolder.WaterAmplitude.Value = Water_Amplitude
-
-	SpawnModel.Parent = workspace
-	BoatFolder.Parent = workspace
-	WaterFolder.Parent = workspace
-
-	WaterPart.Size = WATER_PARTSIZE
-
-	for _,v in pairs(Players:GetPlayers()) do
-		local Chracter = v.Character
-
-		if not Chracter then continue end
-
-		local HumanoidRootPart = Chracter:FindFirstChild("HumanoidRootPart")
-
-		if not HumanoidRootPart then continue end
-
-		HumanoidRootPart.Position = SpawnModel.SpawnLocation.Position + Vector3.yAxis * 5
-	end
-
-	while true do
-		task.wait(CONDITION_CHANGETIME)
-		local SelectedCondition = Conditions[math.random(1,#Conditions)]
-		SetCondition(SelectedCondition)
+		v.Color = GetWaterColor(PartPosition)
+		v.Position = ((WATER_PARTS[v] + CurrentPosition) * Vector3.new(1,0,1)) + (Vector3.yAxis * GetPerlinNoiseValue(PartPosition.X,PartPosition.Z))
 	end
 end
 
-RunService.Heartbeat:Connect(function()
-	Seed += 0.1
-	BoatSystemFolder.WaterSeed.Value = Seed
+local function PlaceWaterPart(Position)
+	local Part = WATER_BLOCK:Clone()
+
+	Part.Position = Position - Vector3.new(0,BOATMODEL_HEIGHT + WaterPartSize.X,0)
+	Part.Color = GetWaterColor(Position)
+	Part.Size = WaterPartSize
+	Part.Anchored = true
+
+	WATER_PARTS[Part] = Part.Position - BoatModel_Primary.Position
+
+	Part.Parent = WaterFolder
+end
+
+local function GenerateCircle(BoatPosition)
+	local Start_X = BoatPosition.X - WATER_RADIUS
+	local Start_Z = BoatPosition.Z - WATER_RADIUS
+
+	local End_X = BoatPosition.X + WATER_RADIUS
+	local End_Z = BoatPosition.Z + WATER_RADIUS
+
+	for X = Start_X, End_X, WaterPartSize.X do
+		for Z = Start_Z, End_Z, WaterPartSize.X do
+			if math.pow(X - BoatPosition.X,2) + math.pow(Z - BoatPosition.Z,2) <= math.pow(WATER_RADIUS,2) then
+				PlaceWaterPart(Vector3.new(X, BoatPosition.Y, Z))
+			end
+		end
+	end
+end
+
+BoatSystemFolder.SetupBoat.OnClientEvent:Connect(function(Boat)
+	if Boat then
+		BoatModel_Primary = Boat.PrimaryPart
+
+		GenerateCircle(BoatModel_Primary.Position)
+
+		WaterRenderConnection = RunService.RenderStepped:Connect(RenderWater)
+	else
+		WaterFolder:ClearAllChildren()
+
+		table.clear(WATER_PARTS)
+
+		if WaterRenderConnection then
+			WaterRenderConnection:Disconnect()
+		end
+	end
 end)
 
-SpawnBoat.ProximityPrompt.Triggered:Connect(function(Player)
-	local BoatClone = BoatModel:Clone()
-	BoatClone.Name = Player.Name
+for _,v in pairs(BoatSystemFolder:GetChildren()) do
+	if v:IsA("NumberValue") then
+		v.Changed:Connect(function(Value)
+			WaterData[v.Name] = Value
+		end)
 
-	BoatClone.PrimaryPart.Position = GetRandomPointOnWater()
-	BoatClone.Parent = workspace:WaitForChild("Boats")
-
-	BoatClone.Seat:Sit(Player.Character.Humanoid)
-end)
-
-SetupBoatSystem()
+		WaterData[v.Name] = v.Value
+	end
+end

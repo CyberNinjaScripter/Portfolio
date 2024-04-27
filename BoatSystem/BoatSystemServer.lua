@@ -1,116 +1,147 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 local BoatSystemFolder = ReplicatedStorage:WaitForChild("BoatSystem")
+local BoatModel = BoatSystemFolder:WaitForChild("Boat")
+local Baseplate = workspace:WaitForChild("Baseplate")
+
+local SpawnModel = BoatSystemFolder:WaitForChild("Spawn")
 local WaterPart = BoatSystemFolder:WaitForChild("WaterPart")
+local SpawnBoat = SpawnModel.SpawnBoat
 
-local Boat_Render_Connection
-local Boat_Tilt = 0
+local Water_Resolution
+local Water_Frequency
+local Water_Amplitude
+local Seed = 1
 
-local WaterData = {
-	WaterAmplitude,
-	WaterFrequency,
-	WaterResolution,
-	WaterSeed
+local DefaultCondition = {
+	CONDITION_NAME = "Normal",
+	WATER_RESOLUTION = 150,
+	WATER_FREQUENCY = 5,
+	WATER_AMPLITUDE = 4
+}
+
+local Conditions = {
+	{
+		CONDITION_NAME = "High waves",
+		WATER_AMPLITUDE = 6
+	},
+
+	{
+		CONDITION_NAME = "Storm",
+		WATER_AMPLITUDE = 7
+	},
+
+	{
+		CONDITION_NAME = "Calm",
+		WATER_AMPLITUDE = 2,
+	},
+
+	{
+		CONDITION_NAME = "Still",
+		WATER_AMPLITUDE = 1,
+	},
+
+	DefaultCondition
+}
+
+local MetaTables = {
+	__index = function(_,Index)
+		return DefaultCondition[Index]
+	end
 }
 
 --
 
-local BOATMODEL = script.Parent.Parent
-local BOATMODEL_SEAT = BOATMODEL:WaitForChild("Seat")
-local BOATMODEL_PRIMARY = BOATMODEL.PrimaryPart
-
-local BOATMODEL_MAXSPEED = 0.5
-local BOATMODEL_MAX_TILT = 0.2
-local BOATMODE_SPEEDMIN = 0.01
-local BOATMODEL_LENGTH = 9
-local BOATMODEL_HEIGHT = 1.6
-local BOATMODEL_SPEED = 0.1
-local BOATMODEL_TILT = 60
-
-local BOAT_HEIGHTOFFSET = Vector3.yAxis * (BOATMODEL_HEIGHT/2 + WaterPart.Size.X)
-local BOAT_SWAY = 25
+local WATER_PARTSIZE = Vector3.new(0.7,1,0.7)
+local CONDITION_CHANGETIME = 60
+local CONDITION_TWEENTIME = 25
 
 --
 
 local function GetPerlinNoiseValue(Number1,Number2)
 	local Y = math.noise(
-		(Number1 + WaterData.WaterSeed) / WaterData.WaterResolution * WaterData.WaterFrequency,
-		(Number2 + WaterData.WaterSeed) / WaterData.WaterResolution * WaterData.WaterFrequency
+		(Number1 + Seed) / Water_Resolution * Water_Frequency,
+		(Number2 + Seed) / Water_Resolution * Water_Amplitude
 	)
 
-	return math.clamp(Y,-1,1) * WaterData.WaterAmplitude
+	return math.clamp(Y,-1,1) * Water_Amplitude
 end
 
-local function IsValidOccupant(Occupant)
-	if Occupant and Occupant.Parent then
-		local Character = Occupant.Parent
-		local Humanoid = Character:FindFirstChild("Humanoid")
+local function GetRandomPointOnWater()
+	local Position = Vector3.new(math.random(-Baseplate.Size.X/2, Baseplate.Size.X/2),0,math.random(-Baseplate.Size.Y/2, Baseplate.Size.Y/2))
+	return Position + Vector3.yAxis * GetPerlinNoiseValue(Position.X,Position.Z)
+end
 
-		return Humanoid and Humanoid.Health > 0
+local function SetCondition(Condition)
+	print("New water condition!",Condition.CONDITION_NAME)
+
+	Water_Resolution = Condition.WATER_RESOLUTION
+	Water_Frequency = Condition.WATER_FREQUENCY
+	Water_Amplitude = Condition.WATER_AMPLITUDE
+
+	TweenService:Create(BoatSystemFolder.WaterResolution,TweenInfo.new(CONDITION_TWEENTIME),{Value = Water_Resolution}):Play()
+	TweenService:Create(BoatSystemFolder.WaterFrequency,TweenInfo.new(CONDITION_TWEENTIME),{Value = Water_Frequency}):Play()
+	TweenService:Create(BoatSystemFolder.WaterAmplitude,TweenInfo.new(CONDITION_TWEENTIME),{Value = Water_Amplitude}):Play()
+end
+
+local function SetupBoatSystem()
+	SetCondition(DefaultCondition)
+
+	for _,v in pairs(Conditions) do
+		setmetatable(v,MetaTables)
+	end
+
+	local BoatFolder = Instance.new("Folder")
+	local WaterFolder = Instance.new("Folder")
+
+	BoatFolder.Name = "Boats"
+	WaterFolder.Name = "Water"
+
+	BoatSystemFolder.WaterResolution.Value = Water_Resolution
+	BoatSystemFolder.WaterFrequency.Value = Water_Frequency
+	BoatSystemFolder.WaterAmplitude.Value = Water_Amplitude
+
+	SpawnModel.Parent = workspace
+	BoatFolder.Parent = workspace
+	WaterFolder.Parent = workspace
+
+	WaterPart.Size = WATER_PARTSIZE
+
+	for _,v in pairs(Players:GetPlayers()) do
+		local Chracter = v.Character
+
+		if not Chracter then continue end
+
+		local HumanoidRootPart = Chracter:FindFirstChild("HumanoidRootPart")
+
+		if not HumanoidRootPart then continue end
+
+		HumanoidRootPart.Position = SpawnModel.SpawnLocation.Position + Vector3.yAxis * 5
+	end
+
+	while true do
+		task.wait(CONDITION_CHANGETIME)
+		local SelectedCondition = Conditions[math.random(1,#Conditions)]
+		SetCondition(SelectedCondition)
 	end
 end
 
-local function RenderBoat()
-	local OldBoatCFrame = BOATMODEL_PRIMARY.CFrame
+RunService.Heartbeat:Connect(function()
+	Seed += 0.1
+	BoatSystemFolder.WaterSeed.Value = Seed
+end)
 
-	local SteerInput = -BOATMODEL_SEAT.SteerFloat/50
+SpawnBoat.ProximityPrompt.Triggered:Connect(function(Player)
+	local BoatClone = BoatModel:Clone()
+	BoatClone.Name = Player.Name
 
-	local ThrottleInput = BOATMODEL_SPEED + BOATMODEL_SEAT.Throttle/50
+	BoatClone.PrimaryPart.Position = GetRandomPointOnWater()
+	BoatClone.Parent = workspace:WaitForChild("Boats")
 
-	local LookVector = OldBoatCFrame.LookVector * Vector3.new(1,0,1)
+	BoatClone.Seat:Sit(Player.Character.Humanoid)
+end)
 
-
-	BOATMODEL_SPEED = ThrottleInput >= 0 and ThrottleInput <= BOATMODEL_MAXSPEED and ThrottleInput or ThrottleInput >= BOATMODEL_MAXSPEED and BOATMODEL_MAXSPEED or BOATMODE_SPEEDMIN
-
-
-	local NewBoatPosition = (OldBoatCFrame.Position * Vector3.new(1,0,1)) + LookVector * BOATMODEL_SPEED
-
-	local NewBoatTipPosition = (OldBoatCFrame.Position * Vector3.new(1,0,1)) + LookVector * (BOATMODEL_LENGTH/3)
-
-
-	local NewBoatPosition_Y = Vector3.yAxis * GetPerlinNoiseValue(NewBoatPosition.X,NewBoatPosition.Z)
-
-	local NewBoatTipPosition_Y = Vector3.yAxis * GetPerlinNoiseValue(NewBoatTipPosition.X,NewBoatTipPosition.Z)
-
-
-	local BoatSteerCFrame = CFrame.Angles(0,SteerInput,math.clamp(SteerInput + OldBoatCFrame.Rotation.Z/BOATMODEL_TILT,-BOATMODEL_MAX_TILT,BOATMODEL_MAX_TILT) + GetPerlinNoiseValue(0,Boat_Tilt)/(WaterData.WaterAmplitude * BOAT_SWAY))
-
-
-	BOATMODEL_PRIMARY.CFrame = CFrame.new(NewBoatPosition + NewBoatPosition_Y,NewBoatTipPosition + NewBoatTipPosition_Y) * BoatSteerCFrame + BOAT_HEIGHTOFFSET
-
-	Boat_Tilt += 0.5
-end
-
-local function OccupantChanged()
-	local Occupant = BOATMODEL_SEAT.Occupant
-
-	if not IsValidOccupant(Occupant) then return end
-
-	local Player = Players:GetPlayerFromCharacter(Occupant.Parent)
-
-	Boat_Render_Connection = RunService.Heartbeat:Connect(RenderBoat)
-
-	BoatSystemFolder.SetupBoat:FireClient(Player,BOATMODEL)
-
-	BOATMODEL_SEAT:GetPropertyChangedSignal("Occupant"):Wait()
-
-	Boat_Render_Connection:Disconnect()
-
-	BoatSystemFolder.SetupBoat:FireClient(Player)
-end
-
-for _,v in pairs(BoatSystemFolder:GetChildren()) do
-	if v:IsA("NumberValue") then
-		v.Changed:Connect(function(Value)
-			WaterData[v.Name] = Value
-		end)
-
-		WaterData[v.Name] = v.Value
-	end
-end
-
-BOATMODEL_SEAT:GetPropertyChangedSignal("Occupant"):Connect(OccupantChanged)
-
-OccupantChanged()
+SetupBoatSystem()

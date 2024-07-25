@@ -44,12 +44,17 @@ local function GetPerlinNoiseValue(Number1,Number2)
 end
 
 local function IsValidOccupant(Occupant)
-	if Occupant and Occupant.Parent then
-		local Character = Occupant.Parent
-		local Humanoid = Character:FindFirstChild("Humanoid")
+	if not Occupant or not Occupant.Parent then return end
+	
+	local Character = Occupant.Parent
+	local Humanoid = Character:FindFirstChild("Humanoid")
 
-		return Humanoid and Humanoid.Health > 0
-	end
+	return Humanoid and Humanoid.Health > 0
+end
+
+local function GetBoatSpeed(ThrottleInput)
+	local UnderMaxSpeed = ThrottleInput <= BOATMODEL_MAXSPEED
+	return ThrottleInput >= 0 and UnderMaxSpeed and ThrottleInput or not UnderMaxSpeed and BOATMODEL_MAXSPEED or BOATMODE_SPEEDMIN
 end
 
 local function RenderBoat()
@@ -60,12 +65,12 @@ local function RenderBoat()
 	local ThrottleInput = BOATMODEL_SPEED + BOATMODEL_SEAT.Throttle/50
 
 	local LookVector = OldBoatCFrame.LookVector * Vector3.new(1,0,1)
+	
+	
+	local CurrentBoatSpeed = GetBoatSpeed(ThrottleInput)
+	
 
-
-	BOATMODEL_SPEED = ThrottleInput >= 0 and ThrottleInput <= BOATMODEL_MAXSPEED and ThrottleInput or ThrottleInput >= BOATMODEL_MAXSPEED and BOATMODEL_MAXSPEED or BOATMODE_SPEEDMIN
-
-
-	local NewBoatPosition = (OldBoatCFrame.Position * Vector3.new(1,0,1)) + LookVector * BOATMODEL_SPEED
+	local NewBoatPosition = (OldBoatCFrame.Position * Vector3.new(1,0,1)) + LookVector * CurrentBoatSpeed
 
 	local NewBoatTipPosition = (OldBoatCFrame.Position * Vector3.new(1,0,1)) + LookVector * (BOATMODEL_LENGTH/3)
 
@@ -81,6 +86,7 @@ local function RenderBoat()
 	BOATMODEL_PRIMARY.CFrame = CFrame.new(NewBoatPosition + NewBoatPosition_Y,NewBoatTipPosition + NewBoatTipPosition_Y) * BoatSteerCFrame + BOAT_HEIGHTOFFSET
 
 	Boat_Tilt += 0.5
+	BOATMODEL_SPEED = CurrentBoatSpeed
 end
 
 local function OccupantChanged()
@@ -102,13 +108,13 @@ local function OccupantChanged()
 end
 
 for _,v in pairs(BoatSystemFolder:GetChildren()) do
-	if v:IsA("NumberValue") then
-		v.Changed:Connect(function(Value)
-			WaterData[v.Name] = Value
-		end)
+	if not v:IsA("NumberValue") then continue end
+	
+	v.Changed:Connect(function(Value)
+		WaterData[v.Name] = Value
+	end)
 
-		WaterData[v.Name] = v.Value
-	end
+	WaterData[v.Name] = v.Value
 end
 
 BOATMODEL_SEAT:GetPropertyChangedSignal("Occupant"):Connect(OccupantChanged)

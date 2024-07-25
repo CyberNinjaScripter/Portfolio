@@ -11,9 +11,11 @@ local SpawnModel = BoatSystemFolder:WaitForChild("Spawn")
 local WaterPart = BoatSystemFolder:WaitForChild("WaterPart")
 local SpawnBoat = SpawnModel.SpawnBoat
 
+local Water_Conditions = true
 local Water_Resolution
 local Water_Frequency
 local Water_Amplitude
+local SeedSpeed = 0.1
 local Seed = 1
 
 local DefaultCondition = {
@@ -87,6 +89,16 @@ local function SetCondition(Condition)
 	TweenService:Create(BoatSystemFolder.WaterAmplitude,TweenInfo.new(CONDITION_TWEENTIME),{Value = Water_Amplitude}):Play()
 end
 
+local WaterConditionCoroutine = coroutine.create(function()
+	while Water_Conditions do
+		task.wait(CONDITION_CHANGETIME)
+
+		local SelectedCondition = Conditions[math.random(1,#Conditions)]
+
+		SetCondition(SelectedCondition)
+	end
+end)
+
 local function SetupBoatSystem()
 	SetCondition(DefaultCondition)
 
@@ -121,16 +133,12 @@ local function SetupBoatSystem()
 
 		HumanoidRootPart.Position = SpawnModel.SpawnLocation.Position + Vector3.yAxis * 5
 	end
-
-	while true do
-		task.wait(CONDITION_CHANGETIME)
-		local SelectedCondition = Conditions[math.random(1,#Conditions)]
-		SetCondition(SelectedCondition)
-	end
+	
+	coroutine.resume(WaterConditionCoroutine)
 end
 
 RunService.Heartbeat:Connect(function()
-	Seed += 0.1
+	Seed += SeedSpeed
 	BoatSystemFolder.WaterSeed.Value = Seed
 end)
 

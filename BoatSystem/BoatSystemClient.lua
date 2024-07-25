@@ -78,9 +78,9 @@ local function GenerateCircle(BoatPosition)
 
 	for X = Start_X, End_X, WaterPartSize.X do
 		for Z = Start_Z, End_Z, WaterPartSize.X do
-			if math.pow(X - BoatPosition.X,2) + math.pow(Z - BoatPosition.Z,2) <= math.pow(WATER_RADIUS,2) then
-				PlaceWaterPart(Vector3.new(X, BoatPosition.Y, Z))
-			end
+			if math.pow(X - BoatPosition.X,2) + math.pow(Z - BoatPosition.Z,2) > math.pow(WATER_RADIUS,2) then return end
+			
+			PlaceWaterPart(Vector3.new(X, BoatPosition.Y, Z))
 		end
 	end
 end
@@ -104,11 +104,11 @@ BoatSystemFolder.SetupBoat.OnClientEvent:Connect(function(Boat)
 end)
 
 for _,v in pairs(BoatSystemFolder:GetChildren()) do
-	if v:IsA("NumberValue") then
-		v.Changed:Connect(function(Value)
-			WaterData[v.Name] = Value
-		end)
+	if not v:IsA("NumberValue") then return end
+	
+	v.Changed:Connect(function(Value)
+		WaterData[v.Name] = Value
+	end)
 
-		WaterData[v.Name] = v.Value
-	end
+	WaterData[v.Name] = v.Value
 end
